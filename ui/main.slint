@@ -1,0 +1,906 @@
+import { AppTheme } from "theme.slint";
+import { ScrollView } from "std-widgets.slint";
+
+export struct TrackItemData {
+    id: string,
+    title: string,
+    artist: string,
+    album: string,
+    duration: string,
+    thumbnail_url: string,
+}
+
+export struct PlaylistItemData {
+    id: string,
+    title: string,
+    item_count: int,
+    thumbnail_url: string,
+}
+
+export component MainWindow inherits Window {
+    title: "gemimusic - YouTube Music Player";
+    min_width: 360px;
+    min_height: 640px;
+    preferred_width: 420px;
+    preferred_height: 780px;
+    background: AppTheme.colors.bg_dark;
+    default_font_family: "Segoe UI, Roboto, sans-serif";
+
+    // Application State Properties
+    in-out property <int> active_tab: 0; // 0 = Explore, 1 = Library
+    in-out property <string> search_query: "";
+    in-out property <[TrackItemData]> search_results: [];
+    in-out property <[PlaylistItemData]> user_playlists: [];
+    in-out property <[TrackItemData]> current_playlist_tracks: [];
+    in-out property <string> selected_playlist_title: "";
+
+    // Now Playing State
+    in-out property <bool> is_playing: false;
+    in-out property <bool> is_buffering: false;
+    in-out property <string> now_playing_title: "No song selected";
+    in-out property <string> now_playing_artist: "Search or pick from playlists";
+    in-out property <float> progress_percent: 0.0;
+    in-out property <string> time_elapsed_str: "0:00";
+    in-out property <string> time_total_str: "0:00";
+    in-out property <float> volume: 0.8;
+
+    // Google Auth State
+    in-out property <bool> is_logged_in: false;
+    in-out property <string> user_display_name: "";
+    in-out property <string> user_email: "";
+    in-out property <bool> show_auth_modal: false;
+    in-out property <string> auth_device_code: "";
+    in-out property <string> auth_verification_url: "google.com/device";
+    in-out property <string> auth_status_text: "Waiting for approval...";
+
+    // Callbacks to Rust backend
+    callback search_submitted(string);
+    callback track_play_requested(int);
+    callback playlist_opened(int);
+    callback back_to_playlists();
+    callback toggle_play_pause();
+    callback play_next();
+    callback play_prev();
+    callback seek_requested(float);
+    callback volume_changed(float);
+    callback start_google_login();
+    callback cancel_google_login();
+    callback sync_playlists();
+    callback sign_out();
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // Top Navigation Header
+        Rectangle {
+            height: 64px;
+            background: AppTheme.colors.bg_surface;
+            border_bottom_width: 1px;
+            border_bottom_color: AppTheme.colors.border;
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                padding_top: 8px;
+                padding_bottom: 8px;
+                spacing: 12px;
+                alignment: center;
+
+                // App Brand Logo & Title
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border_radius: 16px;
+                        background: @linear-gradient(135deg, AppTheme.colors.accent_primary 0%, AppTheme.colors.accent_secondary 100%);
+                        
+                        Text {
+                            text: "♫";
+                            color: #FFFFFF;
+                            font_size: 16px;
+                            font_weight: 700;
+                            horizontal_alignment: center;
+                            vertical_alignment: center;
+                        }
+                    }
+
+                    Text {
+                        text: "gemimusic";
+                        color: AppTheme.colors.text_primary;
+                        font_size: 18px;
+                        font_weight: 700;
+                        vertical_alignment: center;
+                    }
+                }
+
+                // Spacer
+                Rectangle { horizontal_stretch: 1; }
+
+                // Google Account Button
+                Rectangle {
+                    height: 36px;
+                    border_radius: 18px;
+                    background: root.is_logged_in ? AppTheme.colors.bg_surface_hover : AppTheme.colors.accent_primary;
+                    border_width: root.is_logged_in ? 1px : 0px;
+                    border_color: AppTheme.colors.border;
+
+                    HorizontalLayout {
+                        padding_left: 12px;
+                        padding_right: 12px;
+                        spacing: 6px;
+                        alignment: center;
+
+                        Text {
+                            text: root.is_logged_in ? "G" : "Sign In";
+                            color: AppTheme.colors.text_primary;
+                            font_size: 13px;
+                            font_weight: 600;
+                            vertical_alignment: center;
+                        }
+
+                        if root.is_logged_in : Text {
+                            text: root.user_display_name != "" ? root.user_display_name : "Synced";
+                            color: AppTheme.colors.text_secondary;
+                            font_size: 12px;
+                            vertical_alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            if (!root.is_logged_in) {
+                                root.start_google_login();
+                            } else {
+                                root.sync_playlists();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Tab Selector Bar
+        Rectangle {
+            height: 44px;
+            background: AppTheme.colors.bg_surface;
+            border_bottom_width: 1px;
+            border_bottom_color: AppTheme.colors.border;
+
+            HorizontalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                spacing: 20px;
+                alignment: start;
+
+                // Explore Tab
+                Rectangle {
+                    width: 90px;
+                    HorizontalLayout {
+                        alignment: center;
+                        Text {
+                            text: "Explore";
+                            color: root.active_tab == 0 ? AppTheme.colors.text_primary : AppTheme.colors.text_muted;
+                            font_size: 14px;
+                            font_weight: root.active_tab == 0 ? 700 : 500;
+                            vertical_alignment: center;
+                        }
+                    }
+                    if root.active_tab == 0 : Rectangle {
+                        y: parent.height - 3px;
+                        height: 3px;
+                        background: AppTheme.colors.accent_primary;
+                        border_radius: 2px;
+                    }
+                    TouchArea {
+                        clicked => { root.active_tab = 0; }
+                    }
+                }
+
+                // Library / Playlists Tab
+                Rectangle {
+                    width: 120px;
+                    HorizontalLayout {
+                        alignment: center;
+                        Text {
+                            text: "My Playlists";
+                            color: root.active_tab == 1 ? AppTheme.colors.text_primary : AppTheme.colors.text_muted;
+                            font_size: 14px;
+                            font_weight: root.active_tab == 1 ? 700 : 500;
+                            vertical_alignment: center;
+                        }
+                    }
+                    if root.active_tab == 1 : Rectangle {
+                        y: parent.height - 3px;
+                        height: 3px;
+                        background: AppTheme.colors.accent_primary;
+                        border_radius: 2px;
+                    }
+                    TouchArea {
+                        clicked => { root.active_tab = 1; }
+                    }
+                }
+            }
+        }
+
+        // Main Content Area
+        Rectangle {
+            vertical_stretch: 1;
+            clip: true;
+
+            // TAB 0: Explore / Search
+            if root.active_tab == 0 : VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Modern Search Input Field
+                Rectangle {
+                    height: 46px;
+                    background: AppTheme.colors.bg_surface;
+                    border_radius: AppTheme.radius_md;
+                    border_width: 1px;
+                    border_color: AppTheme.colors.border;
+
+                    HorizontalLayout {
+                        padding_left: 14px;
+                        padding_right: 14px;
+                        spacing: 10px;
+                        alignment: center;
+
+                        Text {
+                            text: "🔍";
+                            font_size: 14px;
+                            vertical_alignment: center;
+                        }
+
+                        search_input := TextInput {
+                            text <=> root.search_query;
+                            color: AppTheme.colors.text_primary;
+                            font_size: 14px;
+                            vertical_alignment: center;
+                            accepted => {
+                                root.search_submitted(self.text);
+                            }
+                        }
+
+                        if search_input.text == "" : Text {
+                            text: "Search songs, artists, albums...";
+                            color: AppTheme.colors.text_muted;
+                            font_size: 14px;
+                            vertical_alignment: center;
+                        }
+
+                        Rectangle {
+                            width: 60px;
+                            height: 32px;
+                            border_radius: 16px;
+                            background: AppTheme.colors.accent_primary;
+
+                            Text {
+                                text: "Search";
+                                color: #FFFFFF;
+                                font_size: 12px;
+                                font_weight: 600;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    root.search_submitted(root.search_query);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Track Results List
+                Text {
+                    text: root.search_results.length > 0 ? "Search Results" : "Trending & Search";
+                    color: AppTheme.colors.text_secondary;
+                    font_size: 13px;
+                    font_weight: 600;
+                }
+
+                ScrollView {
+                    vertical_stretch: 1;
+
+                    VerticalLayout {
+                        spacing: 8px;
+
+                        for track[idx] in root.search_results : Rectangle {
+                            height: 64px;
+                            background: touch_track.has_hover ? AppTheme.colors.bg_surface_hover : AppTheme.colors.bg_surface;
+                            border_radius: AppTheme.radius_sm;
+                            border_width: 1px;
+                            border_color: AppTheme.colors.border;
+
+                            HorizontalLayout {
+                                padding_left: 12px;
+                                padding_right: 12px;
+                                spacing: 12px;
+                                alignment: center;
+
+                                // Album / Track icon
+                                Rectangle {
+                                    width: 44px;
+                                    height: 44px;
+                                    border_radius: 6px;
+                                    background: AppTheme.colors.bg_elevated;
+
+                                    Text {
+                                        text: "▶";
+                                        color: AppTheme.colors.accent_primary;
+                                        font_size: 14px;
+                                        horizontal_alignment: center;
+                                        vertical_alignment: center;
+                                    }
+                                }
+
+                                // Title and Artist
+                                VerticalLayout {
+                                    horizontal_stretch: 1;
+                                    alignment: center;
+                                    spacing: 2px;
+
+                                    Text {
+                                        text: track.title;
+                                        color: AppTheme.colors.text_primary;
+                                        font_size: 14px;
+                                        font_weight: 600;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: track.artist;
+                                        color: AppTheme.colors.text_secondary;
+                                        font_size: 12px;
+                                        overflow: elide;
+                                    }
+                                }
+
+                                // Duration
+                                Text {
+                                    text: track.duration != "" ? track.duration : "3:20";
+                                    color: AppTheme.colors.text_muted;
+                                    font_size: 12px;
+                                    vertical_alignment: center;
+                                }
+                            }
+
+                            touch_track := TouchArea {
+                                clicked => {
+                                    root.track_play_requested(idx);
+                                }
+                            }
+                        }
+
+                        if root.search_results.length == 0 : Rectangle {
+                            height: 160px;
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text {
+                                    text: "Type a song name above to stream directly";
+                                    color: AppTheme.colors.text_muted;
+                                    font_size: 14px;
+                                    horizontal_alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // TAB 1: Library & Synced Playlists
+            if root.active_tab == 1 : VerticalLayout {
+                padding: 16px;
+                spacing: 12px;
+
+                // Sync Bar
+                Rectangle {
+                    height: 52px;
+                    background: AppTheme.colors.bg_surface;
+                    border_radius: AppTheme.radius_md;
+                    border_width: 1px;
+                    border_color: AppTheme.colors.border;
+
+                    HorizontalLayout {
+                        padding_left: 14px;
+                        padding_right: 14px;
+                        spacing: 8px;
+                        alignment: center;
+
+                        VerticalLayout {
+                            horizontal_stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+
+                            Text {
+                                text: root.is_logged_in ? "Google Account Connected" : "Sync YouTube Music";
+                                color: AppTheme.colors.text_primary;
+                                font_size: 13px;
+                                font_weight: 600;
+                            }
+                            Text {
+                                text: root.is_logged_in ? root.user_email : "Sign in to access your saved playlists";
+                                color: AppTheme.colors.text_secondary;
+                                font_size: 11px;
+                                overflow: elide;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 90px;
+                            height: 32px;
+                            border_radius: 16px;
+                            background: AppTheme.colors.accent_primary;
+
+                            Text {
+                                text: root.is_logged_in ? "Sync Now" : "Connect";
+                                color: #FFFFFF;
+                                font_size: 12px;
+                                font_weight: 600;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => {
+                                    if (root.is_logged_in) {
+                                        root.sync_playlists();
+                                    } else {
+                                        root.start_google_login();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // If currently viewing a playlist's tracks:
+                if root.selected_playlist_title != "" : VerticalLayout {
+                    spacing: 8px;
+
+                    HorizontalLayout {
+                        spacing: 10px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border_radius: 16px;
+                            background: AppTheme.colors.bg_surface_hover;
+                            Text {
+                                text: "←";
+                                color: AppTheme.colors.text_primary;
+                                font_size: 16px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                            TouchArea {
+                                clicked => { root.back_to_playlists(); }
+                            }
+                        }
+
+                        Text {
+                            text: root.selected_playlist_title;
+                            color: AppTheme.colors.text_primary;
+                            font_size: 16px;
+                            font_weight: 700;
+                            vertical_alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    ScrollView {
+                        vertical_stretch: 1;
+                        VerticalLayout {
+                            spacing: 8px;
+                            for track[idx] in root.current_playlist_tracks : Rectangle {
+                                height: 56px;
+                                background: AppTheme.colors.bg_surface;
+                                border_radius: AppTheme.radius_sm;
+
+                                HorizontalLayout {
+                                    padding_left: 12px;
+                                    padding_right: 12px;
+                                    spacing: 10px;
+                                    alignment: center;
+
+                                    Text {
+                                        text: track.title;
+                                        color: AppTheme.colors.text_primary;
+                                        font_size: 13px;
+                                        font_weight: 600;
+                                        horizontal_stretch: 1;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: track.artist;
+                                        color: AppTheme.colors.text_secondary;
+                                        font_size: 12px;
+                                    }
+                                }
+
+                                TouchArea {
+                                    clicked => {
+                                        root.track_play_requested(idx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Otherwise, show list of playlists
+                if root.selected_playlist_title == "" : ScrollView {
+                    vertical_stretch: 1;
+
+                    VerticalLayout {
+                        spacing: 10px;
+
+                        for pl[idx] in root.user_playlists : Rectangle {
+                            height: 72px;
+                            background: touch_pl.has_hover ? AppTheme.colors.bg_surface_hover : AppTheme.colors.bg_surface;
+                            border_radius: AppTheme.radius_md;
+                            border_width: 1px;
+                            border_color: AppTheme.colors.border;
+
+                            HorizontalLayout {
+                                padding_left: 14px;
+                                padding_right: 14px;
+                                spacing: 14px;
+                                alignment: center;
+
+                                Rectangle {
+                                    width: 48px;
+                                    height: 48px;
+                                    border_radius: 8px;
+                                    background: @linear-gradient(135deg, AppTheme.colors.accent_primary 0%, AppTheme.colors.accent_secondary 100%);
+
+                                    Text {
+                                        text: "📁";
+                                        font_size: 20px;
+                                        horizontal_alignment: center;
+                                        vertical_alignment: center;
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    horizontal_stretch: 1;
+                                    alignment: center;
+                                    spacing: 2px;
+
+                                    Text {
+                                        text: pl.title;
+                                        color: AppTheme.colors.text_primary;
+                                        font_size: 15px;
+                                        font_weight: 600;
+                                        overflow: elide;
+                                    }
+
+                                    Text {
+                                        text: pl.item_count > 0 ? (pl.item_count + " tracks") : "Playlist";
+                                        color: AppTheme.colors.text_secondary;
+                                        font_size: 12px;
+                                    }
+                                }
+
+                                Text {
+                                    text: "›";
+                                    color: AppTheme.colors.text_muted;
+                                    font_size: 20px;
+                                    vertical_alignment: center;
+                                }
+                            }
+
+                            touch_pl := TouchArea {
+                                clicked => {
+                                    root.playlist_opened(idx);
+                                }
+                            }
+                        }
+
+                        if root.user_playlists.length == 0 : Rectangle {
+                            height: 160px;
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 8px;
+                                Text {
+                                    text: "No playlists loaded yet";
+                                    color: AppTheme.colors.text_muted;
+                                    font_size: 14px;
+                                    horizontal_alignment: center;
+                                }
+                                Text {
+                                    text: "Tap Connect above to sync your Google Account";
+                                    color: AppTheme.colors.text_secondary;
+                                    font_size: 12px;
+                                    horizontal_alignment: center;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Bottom Now-Playing Dock Bar
+        Rectangle {
+            height: 90px;
+            background: AppTheme.colors.bg_surface;
+            border_top_width: 1px;
+            border_top_color: AppTheme.colors.border;
+
+            VerticalLayout {
+                padding_left: 16px;
+                padding_right: 16px;
+                padding_top: 8px;
+                padding_bottom: 8px;
+                spacing: 4px;
+
+                // Scrub / Progress Bar
+                Rectangle {
+                    height: 14px;
+
+                    // Progress track background
+                    Rectangle {
+                        y: 5px;
+                        height: 4px;
+                        background: AppTheme.colors.border;
+                        border_radius: 2px;
+
+                        // Filled active progress
+                        Rectangle {
+                            width: parent.width * Math.max(0.0, Math.min(1.0, root.progress_percent));
+                            height: 4px;
+                            background: @linear-gradient(90deg, AppTheme.colors.accent_primary 0%, AppTheme.colors.accent_secondary 100%);
+                            border_radius: 2px;
+                        }
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.seek_requested(self.mouse_x / self.width);
+                        }
+                    }
+                }
+
+                // Controls and Track Info
+                HorizontalLayout {
+                    spacing: 12px;
+                    alignment: center;
+
+                    // Thumbnail & Info
+                    HorizontalLayout {
+                        horizontal_stretch: 1;
+                        spacing: 10px;
+                        alignment: center;
+
+                        Rectangle {
+                            width: 44px;
+                            height: 44px;
+                            border_radius: 8px;
+                            background: AppTheme.colors.bg_elevated;
+
+                            Text {
+                                text: root.is_buffering ? "⏳" : "♪";
+                                font_size: 18px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                        }
+
+                        VerticalLayout {
+                            horizontal_stretch: 1;
+                            alignment: center;
+                            spacing: 1px;
+
+                            Text {
+                                text: root.now_playing_title;
+                                color: AppTheme.colors.text_primary;
+                                font_size: 13px;
+                                font_weight: 600;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: root.now_playing_artist;
+                                color: AppTheme.colors.text_secondary;
+                                font_size: 11px;
+                                overflow: elide;
+                            }
+
+                            Text {
+                                text: root.time_elapsed_str + " / " + root.time_total_str;
+                                color: AppTheme.colors.text_muted;
+                                font_size: 10px;
+                            }
+                        }
+                    }
+
+                    // Transport Buttons
+                    HorizontalLayout {
+                        spacing: 12px;
+                        alignment: center;
+
+                        // Prev
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border_radius: 16px;
+                            background: AppTheme.colors.bg_surface_hover;
+                            Text {
+                                text: "⏮";
+                                color: AppTheme.colors.text_primary;
+                                font_size: 13px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                            TouchArea {
+                                clicked => { root.play_prev(); }
+                            }
+                        }
+
+                        // Play / Pause Large Glow Button
+                        Rectangle {
+                            width: 44px;
+                            height: 44px;
+                            border_radius: 22px;
+                            background: @linear-gradient(135deg, AppTheme.colors.accent_primary 0%, AppTheme.colors.accent_secondary 100%);
+
+                            Text {
+                                text: root.is_playing ? "⏸" : "▶";
+                                color: #FFFFFF;
+                                font_size: 18px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+
+                            TouchArea {
+                                clicked => { root.toggle_play_pause(); }
+                            }
+                        }
+
+                        // Next
+                        Rectangle {
+                            width: 32px;
+                            height: 32px;
+                            border_radius: 16px;
+                            background: AppTheme.colors.bg_surface_hover;
+                            Text {
+                                text: "⏭";
+                                color: AppTheme.colors.text_primary;
+                                font_size: 13px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                            TouchArea {
+                                clicked => { root.play_next(); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Google OAuth Device Code Dialog Modal
+    if root.show_auth_modal : Rectangle {
+        background: #000000CC; // Translucent backdrop
+
+        Rectangle {
+            width: 340px;
+            height: 380px;
+            background: AppTheme.colors.bg_surface;
+            border_radius: AppTheme.radius_lg;
+            border_width: 1px;
+            border_color: AppTheme.colors.accent_primary;
+
+            VerticalLayout {
+                padding: 24px;
+                spacing: 14px;
+                alignment: center;
+
+                // Header
+                Text {
+                    text: "Sign In With Google";
+                    color: AppTheme.colors.text_primary;
+                    font_size: 18px;
+                    font_weight: 700;
+                    horizontal_alignment: center;
+                }
+
+                Text {
+                    text: "Sync your YouTube Music playlists and library effortlessly";
+                    color: AppTheme.colors.text_secondary;
+                    font_size: 12px;
+                    horizontal_alignment: center;
+                    wrap: word-wrap;
+                }
+
+                // Step Instructions
+                Rectangle {
+                    background: AppTheme.colors.bg_dark;
+                    border_radius: AppTheme.radius_md;
+                    padding: 12px;
+
+                    VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            text: "1. Open on your phone or browser:";
+                            color: AppTheme.colors.text_muted;
+                            font_size: 12px;
+                        }
+                        Text {
+                            text: root.auth_verification_url;
+                            color: AppTheme.colors.accent_primary;
+                            font_size: 14px;
+                            font_weight: 700;
+                            horizontal_alignment: center;
+                        }
+                        Text {
+                            text: "2. Enter this code:";
+                            color: AppTheme.colors.text_muted;
+                            font_size: 12px;
+                        }
+                        // Big Code Box
+                        Rectangle {
+                            height: 48px;
+                            background: AppTheme.colors.bg_surface_hover;
+                            border_radius: 8px;
+                            border_width: 1px;
+                            border_color: AppTheme.colors.accent_secondary;
+
+                            Text {
+                                text: root.auth_device_code;
+                                color: #FFFFFF;
+                                font_size: 20px;
+                                font_weight: 800;
+                                letter_spacing: 3px;
+                                horizontal_alignment: center;
+                                vertical_alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                // Status text
+                Text {
+                    text: root.auth_status_text;
+                    color: AppTheme.colors.text_secondary;
+                    font_size: 12px;
+                    horizontal_alignment: center;
+                }
+
+                // Cancel button
+                Rectangle {
+                    height: 36px;
+                    border_radius: 18px;
+                    background: AppTheme.colors.bg_surface_hover;
+
+                    Text {
+                        text: "Cancel";
+                        color: AppTheme.colors.text_primary;
+                        font_size: 13px;
+                        font_weight: 600;
+                        horizontal_alignment: center;
+                        vertical_alignment: center;
+                    }
+
+                    TouchArea {
+                        clicked => {
+                            root.cancel_google_login();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

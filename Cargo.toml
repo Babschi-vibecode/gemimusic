@@ -1,0 +1,78 @@
+[package]
+name = "gemimusic"
+version = "0.1.0"
+edition = "2021"
+authors = ["gemimusic Developer"]
+description = "Lightweight, modern YouTube Music player for Android and Desktop in Rust"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "gemimusic"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "gemimusic"
+path = "src/main.rs"
+
+[dependencies]
+# UI Framework - Slint (Modern, lightweight native declarative UI)
+slint = { version = "1.8", default-features = true }
+
+# Asynchronous runtime & networking
+tokio = { version = "1.38", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream", "blocking"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+url = "2.5"
+
+# Audio playback and decoding
+rodio = { version = "0.19", default-features = false, features = ["symphonia-all"] }
+cpal = "0.15"
+
+# Utilities & Logging
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
+dirs = "5.0"
+parking_lot = "0.12"
+crossbeam-channel = "0.5"
+
+# Android specific dependencies
+[target.'cfg(target_os = "android")'.dependencies]
+android_logger = "0.14"
+ndk-glue = "0.7"
+ndk = "0.8"
+
+[build-dependencies]
+slint-build = "1.8"
+
+# Android APK packaging metadata for cargo-apk
+[package.metadata.android]
+package = "com.gemimusic.app"
+apk_label = "gemimusic"
+target_sdk_version = 34
+min_sdk_version = 26
+version_code = 1
+version_name = "0.1.0"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.ACCESS_NETWORK_STATE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.FOREGROUND_SERVICE"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WAKE_LOCK"
+
+[profile.release]
+opt-level = "z"     # Optimize for size (keep it lightweight)
+lto = true          # Link Time Optimization
+codegen-units = 1   # Single codegen unit for maximum optimization
+panic = "abort"     # Remove unwind tables
+strip = true        # Automatically strip symbols from the binary

@@ -1,0 +1,34 @@
+export struct Palette {
+    bg_dark: color,
+    bg_surface: color,
+    bg_surface_hover: color,
+    bg_elevated: color,
+    accent_primary: color,
+    accent_secondary: color,
+    text_primary: color,
+    text_secondary: color,
+    text_muted: color,
+    border: color,
+    success: color,
+}
+
+export global AppTheme {
+    out property <Palette> colors: {
+        bg_dark: #0D0E15,
+        bg_surface: #171822,
+        bg_surface_hover: #222436,
+        bg_elevated: #2A2D43,
+        accent_primary: #8B5CF6,
+        accent_secondary: #EC4899,
+        text_primary: #FFFFFF,
+        text_secondary: #94A3B8,
+        text_muted: #64748B,
+        border: #23263B,
+        success: #10B981,
+    };
+
+    out property <length> radius_sm: 8px;
+    out property <length> radius_md: 14px;
+    out property <length> radius_lg: 20px;
+    out property <length> radius_full: 999px;
+}
