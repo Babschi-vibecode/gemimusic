@@ -1,0 +1,58 @@
+name: Build gemimusic Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libfontconfig1-dev libssl-dev pkg-config
+
+      - name: Install cargo-apk
+        run: |
+          cargo install cargo-apk
+
+      - name: Configure Android NDK
+        run: |
+          SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [ -z "$SDK_DIR" ]; then
+            SDK_DIR="/usr/local/lib/android/sdk"
+          fi
+          NDK_PATH=$(ls -d $SDK_DIR/ndk/* 2>/dev/null | tail -n 1)
+          if [ -z "$NDK_PATH" ]; then
+            $SDK_DIR/cmdline-tools/latest/bin/sdkmanager --install "ndk;26.1.10909125"
+            NDK_PATH="$SDK_DIR/ndk/26.1.10909125"
+          fi
+          echo "Using Android NDK: $NDK_PATH"
+          echo "ANDROID_HOME=$SDK_DIR" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+          echo "NDK_HOME=$NDK_PATH" >> $GITHUB_ENV
+
+      - name: Compile Release APK
+        run: |
+          cargo apk build --release
+
+      - name: Upload Finished APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: gemimusic-android-apk
+          path: target/release/apk/*.apk
