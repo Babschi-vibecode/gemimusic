@@ -53,7 +53,6 @@ apk_label = "gemimusic"
 target_sdk_version = 34
 min_sdk_version = 26
 version_code = 1
-version_name = "0.1.0"
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
